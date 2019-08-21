@@ -6,23 +6,7 @@ import torch.nn.functional as F
 from scipy.stats import logistic
 import argparse
 
-parser = argparse.ArgumentParser(description='Promoter Strength Prediction tool')
-parser.add_argument('data_path', type=str, help='location of the text file containing spacer sequences')
-parser.add_argument('--output_path', '-o', type=str, default='output',
-                    help='location of the text file containing spacer sequences')
-parser.add_argument('--cuda', action='store_true', help='use CUDA')
-args = parser.parse_known_args()[0]
-if args.output_path[-4:] == '.csv':
-    args.output_path = args.output_path[:-4]
-
-device = torch.device('cuda' if args.cuda else 'cpu')
-
-
-# args.data_path = 'seqs.fa'
-# args.output_path = 'output.txt'
-# args.cuda = False
-
-
+DEF_ARGS = argparse.Namespace(data_path='ex_seqs.fa', output_path='ex_seqs_out', cuda=False)
 
 class ORNet(nn.Module):
     def __init__(self, in_features, nclass, device):
@@ -64,7 +48,7 @@ class ORNet(nn.Module):
         else:
             return x
 
-class PromNeural_prev(nn.Module):
+class PromNeural(nn.Module):
     def __init__(self, nclass, batch_size, device):
         """The DeepRibo model architecture
 
@@ -73,7 +57,7 @@ class PromNeural_prev(nn.Module):
             layers (int): amount of GRU layers
             bidirect (bool): model uses a bidirectional GRU
         """
-        super(PromNeural_prev, self).__init__()
+        super(PromNeural, self).__init__()
         self.dev = device
         self.or_type = 3
         self.layers = 2
@@ -103,55 +87,94 @@ class PromNeural_prev(nn.Module):
         
         return x
 
-# INITIALIZE MODEL
+def initialize_model(args):
+    device = torch.device('cuda' if args.cuda else 'cpu')
+    nclass = 11
+    batch_size = 32
+    model = PromNeural(nclass, batch_size, device)
+    model.load_state_dict(torch.load('models/model_RPOD.pt', map_location=device))
+    model.to(device)
+    model.eval()
+    
+    return model
 
-nclass = 11
-model = PromNeural_prev(11, 32, device)
-model.load_state_dict(torch.load('models/model_RPOD.pt', map_location=device))
-model.to(device)
-model.eval()
+def read_data(args):
+    nts = ['A', 'C', 'G', 'T']
+    seqs = []
+    seq_ids = []
+    with open(args.data_path) as f:
+        for line in f:
+            seq = line.strip().upper()
+            if seq[0] == '>':
+                seq_id = seq[1:]
+            elif (np.array([nt in nts for nt in list(seq)]).all()) and (len(seq) == 17):
+                seqs.append(seq)
+                seq_ids.append(seq_id)
+            else:
+                print(f'{seq} is not a valid spacer sequence and is excluded.')
+    assert len(seqs)>0, "No valid sequences"
+    
+    return seq_ids, seqs
 
-# READ DATA
-nts = ['A', 'C', 'G', 'T']
-seq_dict = {"A": 0, "T": 1, "C": 2, "G": 3}
+def transform_data(seqs):
+    seq_dict = {"A": 0, "T": 1, "C": 2, "G": 3}
+    seq_img = np.full((len(seqs), 4, len(seqs[0]), 1), 0)
+    for i, string in enumerate(seqs):
+        for j, nt in enumerate(string):
+            if nt in ['A','T','C','G']:
+                seq_img[i, seq_dict[nt], j, 0] = 1
+                
+    return seq_img
 
-#path = '/home/data/jclauwaert/pytorch/TSS/transformer-xl/sequences.txt'
-seqs = []
-seq_ids = []
-with open(args.data_path) as f:
-    for line in f:
-        seq = line.strip().upper()
-        if seq[0] == '>':
-            seq_id = seq
-        elif (np.array([nt in nts for nt in list(seq)]).all()) and (len(seq) == 17):
-            seqs.append(seq)
-            seq_ids.append(seq_id)
-        else:
-            print(f'{seq} is not a valid spacer sequence and is excluded.')
+def create_output(pred_te_prob, pred_te_disc, seq_ids, seqs, args):
+    probs_dict = {f'P(Class {i}|spacer)':probs for i,probs in enumerate(pred_te_prob.T)}
+    if len(seq_ids) == len(seqs):
+        ids = seq_ids
+    else:
+        ids = np.arange(len(seqs))
 
-# TRANSFORM DATA
-assert len(seqs)>0, "No valid sequences"
+    output = pd.DataFrame({'ID': ids, 'spacer':seqs, 'strength': pred_te_disc})
 
-seq_img = np.full((len(seqs), 4, len(seqs[0]), 1), 0)
-for i, string in enumerate(seqs):
-    for j, nt in enumerate(string):
-        if nt in ['A','T','C','G']:
-            seq_img[i, seq_dict[nt], j, 0] = 1
+    for key, series in probs_dict.items():
+        output[key] = series
+    output.to_csv(f'{args.output_path}.csv')
+    
+    return output
 
-# FORWARD PASS
-pred_te = model(torch.Tensor(seq_img).to(device))
-pred_te_prob = logistic.cdf(pred_te.cpu().data.numpy())
-pred_te_disc = np.argmax(pred_te_prob, axis=1).astype(np.int)
+def forward_pass(model, seq_img, args):
+    device = torch.device('cuda' if args.cuda else 'cpu')
+    pred_te = model(torch.Tensor(seq_img).to(device))
+    pred_te_prob = logistic.cdf(pred_te.cpu().data.numpy())
+    pred_te_disc = np.argmax(pred_te_prob, axis=1).astype(np.int)
+    
+    return pred_te_prob, pred_te_disc
 
-# CREATE OUTPUT
-probs_dict = {f'P(Class {i}|spacer)':probs for i,probs in enumerate(pred_te_prob.T)}
-if len(seq_ids) == len(seqs):
-    ids = seq_ids
-else:
-    ids = np.arange(len(seqs))
+def main(args):
 
-output = pd.DataFrame({'ID': ids, 'spacer':seqs, 'strength': pred_te_disc})
+    
+    # INITIALIZE MODEL
+    model = initialize_model(args)
 
-for key, series in probs_dict.items():
-    output[key] = series
-output.to_csv(f'{args.output_path}.csv')
+    # READ DATA
+    seq_ids, seqs = read_data(args)
+
+    # TRANSFORM DATA
+    seq_img = transform_data(seqs)
+
+    # FORWARD PASS
+    pred_te_prob, pred_te_disc = forward_pass(model, seq_img, args)
+    
+    # CREATE OUTPUT
+    output = create_output(pred_te_prob, pred_te_disc, seq_ids, seqs, args)
+
+if __name__=="__main__":
+    parser = argparse.ArgumentParser(description='Promoter Strength Prediction tool')
+    parser.add_argument('data_path', type=str, help='location of the text file containing spacer sequences')
+    parser.add_argument('--output_path', '-o', type=str, default='output',
+                        help='location of the text file containing spacer sequences')
+    parser.add_argument('--cuda', action='store_true', help='use CUDA. Requires PyTorch installation supporting CUDA!')
+    args = parser.parse_known_args()[0]
+    if args.output_path[-4:] == '.csv':
+        args.output_path = args.output_path[:-4]
+        
+    main(args)
