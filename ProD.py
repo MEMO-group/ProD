@@ -87,8 +87,8 @@ class PromNeural(nn.Module):
         
         return x
 
-def initialize_model(args):
-    device = torch.device('cuda' if args.cuda else 'cpu')
+def initialize_model(cuda=False):
+    device = torch.device('cuda' if cuda else 'cpu')
     nclass = 11
     batch_size = 32
     model = PromNeural(nclass, batch_size, device)
@@ -98,20 +98,29 @@ def initialize_model(args):
     
     return model
 
-def read_data(args):
-    nts = ['A', 'C', 'G', 'T']
+def parse_lines(lines):
     seqs = []
     seq_ids = []
-    with open(args.data_path) as f:
-        for line in f:
-            seq = line.strip().upper()
-            if seq[0] == '>':
-                seq_id = seq[1:]
-            elif (np.array([nt in nts for nt in list(seq)]).all()) and (len(seq) == 17):
-                seqs.append(seq)
-                seq_ids.append(seq_id)
-            else:
-                print(f'{seq} is not a valid spacer sequence and is excluded.')
+    nts = ['A', 'C', 'G', 'T']
+    for line in lines:
+        seq = line.strip().upper()
+        if seq[0] == '>':
+            seq_id = seq[1:]
+            seq_ids.append(seq_id)
+        elif (np.array([nt in nts for nt in list(seq)]).all()) and (len(seq) == 17):
+            seqs.append(seq)
+        else:
+            print(f'{seq} is not a valid spacer sequence and is excluded.')
+    
+    return seq_ids, seqs
+
+def read_data(input_data):
+    assert type(input_data) is str or type(input_data) is list, f'input data: {type(input_data)} not accepted'
+    if type(input_data) is str:
+        with open(input_data) as f:
+            seq_ids, seqs = parse_lines(f)
+    else:
+        seq_ids, seqs = parse_lines(input_data)
     assert len(seqs)>0, "No valid sequences"
     
     return seq_ids, seqs
@@ -126,7 +135,15 @@ def transform_data(seqs):
                 
     return seq_img
 
-def create_output(pred_te_prob, pred_te_disc, seq_ids, seqs, args):
+def forward_pass(model, seq_img, cuda=False):
+    device = torch.device('cuda' if cuda else 'cpu')
+    pred_te = model(torch.Tensor(seq_img).to(device))
+    pred_te_prob = logistic.cdf(pred_te.cpu().data.numpy())
+    pred_te_disc = np.argmax(pred_te_prob, axis=1).astype(np.int)
+    
+    return pred_te_prob, pred_te_disc
+
+def create_output(pred_te_prob, pred_te_disc, seq_ids, seqs, output_path):
     probs_dict = {f'P(Class {i}|spacer)':probs for i,probs in enumerate(pred_te_prob.T)}
     if len(seq_ids) == len(seqs):
         ids = seq_ids
@@ -137,38 +154,30 @@ def create_output(pred_te_prob, pred_te_disc, seq_ids, seqs, args):
 
     for key, series in probs_dict.items():
         output[key] = series
-    output.to_csv(f'{args.output_path}.csv')
+    output.to_csv(f'{output_path}.csv')
     
     return output
 
-def forward_pass(model, seq_img, args):
-    device = torch.device('cuda' if args.cuda else 'cpu')
-    pred_te = model(torch.Tensor(seq_img).to(device))
-    pred_te_prob = logistic.cdf(pred_te.cpu().data.numpy())
-    pred_te_disc = np.argmax(pred_te_prob, axis=1).astype(np.int)
-    
-    return pred_te_prob, pred_te_disc
 
 def main(args):
 
-    
     # INITIALIZE MODEL
-    model = initialize_model(args)
+    model = initialize_model(args.cuda)
 
     # READ DATA
-    seq_ids, seqs = read_data(args)
+    seq_ids, seqs = read_data(args.data_path)
 
     # TRANSFORM DATA
     seq_img = transform_data(seqs)
 
     # FORWARD PASS
-    pred_te_prob, pred_te_disc = forward_pass(model, seq_img, args)
+    pred_te_prob, pred_te_disc = forward_pass(model, seq_img, args.cuda)
     
     # CREATE OUTPUT
-    output = create_output(pred_te_prob, pred_te_disc, seq_ids, seqs, args)
+    output = create_output(pred_te_prob, pred_te_disc, seq_ids, seqs, args.output_path)
 
 if __name__=="__main__":
-    parser = argparse.ArgumentParser(description='Promoter Strength Prediction tool')
+    parser = argparse.ArgumentParser(description='Promoter Designer (ProD) tool')
     parser.add_argument('data_path', type=str, help='location of the text file containing spacer sequences')
     parser.add_argument('--output_path', '-o', type=str, default='output',
                         help='location of the text file containing spacer sequences')
@@ -176,5 +185,4 @@ if __name__=="__main__":
     args = parser.parse_known_args()[0]
     if args.output_path[-4:] == '.csv':
         args.output_path = args.output_path[:-4]
-        
     main(args)
