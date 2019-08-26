@@ -5,8 +5,19 @@ import torch.nn as nn
 import torch.nn.functional as F
 from scipy.stats import logistic
 import argparse
+from pdb import set_trace
 
 DEF_ARGS = argparse.Namespace(data_path='ex_seqs.fa', output_path='ex_seqs_out', cuda=False)
+
+SEQ_DICT = {'A': [0], 'T': [1], 'C': [2], 'G': [3], 'R': [0,3],
+            'Y': [1,2], 'S': [2,3], 'W': [0,1], 'K': [1,3],
+            'M': [0,2], 'B': [1,2,3], 'D': [0,1,3], 
+            'H': [0,1,2], 'V': [0,2,3], 'N':[0,1,2,3]}
+SS_DICT= {'A': ['A'], 'T': ['T'], 'C': ['C'], 'G': ['G'], 'R': ['A','G'],
+            'Y': ['T','C'], 'S': ['C','G'], 'W': ['A','T'], 'K': ['T','G'],
+            'M': ['A','C'], 'B': ['T','C','G'], 'D': ['A','T','G'], 
+            'H': ['A','T','C'], 'V': ['A','C','G'], 'N':['A','T','C','G']}
+IMG_DICT = {0: 'A', 1:'T', 2:'C', 3:'G'}
 
 class ORNet(nn.Module):
     def __init__(self, in_features, nclass, device):
@@ -101,21 +112,24 @@ def initialize_model(cuda=False):
 def parse_lines(lines):
     seqs = []
     seq_ids = []
-    nts = ['A', 'C', 'G', 'T']
+    excl_seqs = []
     for line in lines:
         seq = line.strip().upper()
         if seq[0] == '>':
             seq_id = seq[1:]
             seq_ids.append(seq_id)
-        elif (np.array([nt in nts for nt in list(seq)]).all()) and (len(seq) == 17):
+        elif (np.array([nt in SEQ_DICT.keys() for nt in list(seq)]).all()) and (len(seq) == 17):
             seqs.append(seq)
         else:
-            print(f'{seq} is not a valid spacer sequence and is excluded.')
+            excl_seqs.append(seq)
+        
+    if len(excl_seqs) > 0:
+        print(f'{excl_seqs}: invalid spacer sequences excluded from data.')
     
     return seq_ids, seqs
 
 def read_data(input_data):
-    assert type(input_data) is str or type(input_data) is list, f'input data: {type(input_data)} not accepted'
+    assert type(input_data) in [str, list, np.ndarray], f'input data: {type(input_data)} not accepted'
     if type(input_data) is str:
         with open(input_data) as f:
             seq_ids, seqs = parse_lines(f)
@@ -125,15 +139,35 @@ def read_data(input_data):
     
     return seq_ids, seqs
 
-def transform_data(seqs):
-    seq_dict = {"A": 0, "T": 1, "C": 2, "G": 3}
-    seq_img = np.full((len(seqs), 4, len(seqs[0]), 1), 0)
-    for i, string in enumerate(seqs):
-        for j, nt in enumerate(string):
-            if nt in ['A','T','C','G']:
-                seq_img[i, seq_dict[nt], j, 0] = 1
+def string_to_img(seqs):
+    seqs_img = np.full((len(seqs), 4, len(seqs[0]), 1), 0)
+    for idx1, string in enumerate(seqs):
+        for idx2, nt in enumerate(string):
+            assert nt in SEQ_DICT.keys(), f'invalid input: {nt}'
+            seqs_img[idx1, np.random.choice(SEQ_DICT[nt]), idx2, 0] = 1
                 
-    return seq_img
+    return seqs_img
+
+def string_to_string(seqs):
+    seqs_new = []
+    seq = np.full(len(seqs[0]), 'N',dtype='|S1')
+    for string in seqs:
+        for idx, nt in enumerate(string):
+            assert nt in SS_DICT.keys(), f'invalid input: {nt}'
+            seq[idx] = np.random.choice(SS_DICT[nt])
+        seqs_new.append(seq.tostring().decode('utf-8'))
+                
+    return seqs_new
+
+def img_to_string(seqs_img):
+    seqs = []
+    seq = np.full(seqs_img[0].shape[1], 'N',dtype='|S1')
+    for seq_img in seqs_img:
+        for idx, nt_img in enumerate(seq_img.transpose(1,0,2)):
+            seq[idx] = IMG_DICT[nt_img.argmax()]
+        seqs.append(seq.tostring().decode('utf-8'))
+    
+    return seqs
 
 def forward_pass(model, seq_img, cuda=False):
     device = torch.device('cuda' if cuda else 'cpu')
@@ -143,7 +177,7 @@ def forward_pass(model, seq_img, cuda=False):
     
     return pred_te_prob, pred_te_disc
 
-def create_output(pred_te_prob, pred_te_disc, seq_ids, seqs, output_path):
+def create_output(pred_te_prob, pred_te_disc, seq_ids, seqs):
     probs_dict = {f'P(Class {i}|spacer)':probs for i,probs in enumerate(pred_te_prob.T)}
     if len(seq_ids) == len(seqs):
         ids = seq_ids
@@ -151,38 +185,74 @@ def create_output(pred_te_prob, pred_te_disc, seq_ids, seqs, output_path):
         ids = np.arange(len(seqs))
 
     output = pd.DataFrame({'ID': ids, 'spacer':seqs, 'strength': pred_te_disc})
+    
+    output['promoter'] = ' GGTCTATGAGTGGTTGCTGGATAAC TTTACG ' + output.spacer + \
+    ' TATAAT ATATTC AGGGAGAGCACAACGGTTTCCCTCTACAAATAATTTTGTTTAACTTT'
 
     for key, series in probs_dict.items():
         output[key] = series
-    output.to_csv(f'{output_path}.csv')
     
     return output
 
-
-def main(args):
-
+def forward(input_data, lib=False, lib_size=5, cuda=False):
     # INITIALIZE MODEL
-    model = initialize_model(args.cuda)
-
+    model = initialize_model(cuda)
     # READ DATA
-    seq_ids, seqs = read_data(args.data_path)
-
-    # TRANSFORM DATA
-    seq_img = transform_data(seqs)
-
-    # FORWARD PASS
-    pred_te_prob, pred_te_disc = forward_pass(model, seq_img, args.cuda)
+    seq_ids, seqs = read_data(input_data)
+    if lib:
+        print(f'Using {seqs[0]} as blueprint')
+        total = 1
+        for idx in np.arange(len(seqs[0])):
+            total *= len(SEQ_DICT[seqs[0][idx]])
+        print(f'{total} sequences possible, sampling {np.minimum(total, 5000)}')
+        # GENERATE DATA
+        seqs = np.full(10000, seqs[0])
+    # TRANSFORM DATA    
+    seqs = np.unique(string_to_string(seqs))
+    seqs_img = string_to_img(seqs)
     
-    # CREATE OUTPUT
-    output = create_output(pred_te_prob, pred_te_disc, seq_ids, seqs, args.output_path)
-
+    idx = 0
+    outputs = []
+    while idx*1000 < len(seqs):
+        # FORWARD PASS
+        pred_prob, pred_disc = forward_pass(model, seqs_img[idx*1000:(idx+1)*1000], cuda)
+        # CREATE OUTPUT
+        outputs.append(create_output(pred_prob, pred_disc,
+                               seq_ids[idx*1000:(idx+1)*1000], 
+                               seqs[idx*1000:(idx+1)*1000]))
+        idx += 1
+        if lib:
+            out_temp = pd.DataFrame().append(outputs, ignore_index=True)
+            if (out_temp.strength.value_counts() >= lib_size).all():
+                break
+            elif idx*1000 >= len(seqs):
+                print(f'Could not find requested size for each of the classes.')
+                if total>5000:
+                    print(f'Sampled 5000 out of {total} possible sequences.\
+                    Rerun the tool to evaluate more samples')
+    
+    outputs = pd.DataFrame().append(outputs, ignore_index=True)
+    if lib:
+        output_list = [outputs.loc[outputs.strength == i][:lib_size] for i in np.arange(11)]
+        outputs = pd.DataFrame().append(output_list, ignore_index=True)  
+    return outputs
+    
+def run_tool(input_data, output_path='my_predictions', lib=False, lib_size=5, cuda=False):
+    output = forward(input_data, lib, lib_size, cuda)
+    output.to_csv(f'{output_path}.csv')
+    
+    return output.iloc[:,:4]
+    
 if __name__=="__main__":
     parser = argparse.ArgumentParser(description='Promoter Designer (ProD) tool')
     parser.add_argument('data_path', type=str, help='location of the text file containing spacer sequences')
     parser.add_argument('--output_path', '-o', type=str, default='output',
-                        help='location of the text file containing spacer sequences')
+                    help='location of the text file containing spacer sequences')
+    parser.add_argument('--lib', action='store_true', help='create library from blueprint')
+    parser.add_argument('--lib_size', '-ls', type=int, default='5',
+                    help='size of each class in library')
     parser.add_argument('--cuda', action='store_true', help='use CUDA. Requires PyTorch installation supporting CUDA!')
     args = parser.parse_known_args()[0]
     if args.output_path[-4:] == '.csv':
         args.output_path = args.output_path[:-4]
-    main(args)
+    run_tool(args.data_path, args.output_path, args.lib, args.lib_size, args.cuda)
