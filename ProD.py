@@ -203,7 +203,7 @@ def read_data(input_data):
     if type(input_data[0]) is str:
         cond_1 = np.array([nt in SEQ_DICT.keys() for nt in list(input_data[0])]).all()
         if (len(input_data[0]) == 17) and cond_1:
-            seq_ids, seqs = parse_lines([input_data])
+            seq_ids, seqs = parse_lines(input_data)
         else:
             with open(input_data[0]) as f:
                 seq_ids, seqs = parse_lines(f)
