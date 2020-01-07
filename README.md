@@ -2,11 +2,11 @@
 
 Article:
 
->[Fancy article name]()
+>[Predictive design of sigma factor-specific promoters]()
 
->Maarten Van Brempt, Jim Clauwaert, Willem Waegeman, Marjan De Mey
+>Maarten Van Brempt, Jim Clauwaert, Friederike Mey, Michiel Stock, Jo Maertens, Willem Waegeman, Marjan De Mey
 
->Important article
+>Journal
 
 ## Introduction
 The Promoter Designer (ProD) tool is a shallow neural network created by Van Brempt M. and Clauwaert. J et. al. for the prediction of promoter strength or transcription initiation frequency by variation of the spacer sequence. 
@@ -67,7 +67,7 @@ optional arguments:
 
 
 
-## Creating a Library
+## Constructing a Library
 
 To create a custom promoter library, a single input blueprint is given that functions as the source from which spacer sequences are evaluated. The tool will run through the following steps:
 
