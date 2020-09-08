@@ -8,6 +8,9 @@ Article:
 
 >Journal
 
+#### Cite this tool!
+[![DOI](https://zenodo.org/badge/203577751.svg)](https://zenodo.org/badge/latestdoi/203577751)
+
 ## Introduction
 The Promoter Designer (ProD) tool is a shallow neural network created by Van Brempt M. and Clauwaert. J et. al. for the prediction of promoter strength or transcription initiation frequency by variation of the spacer sequence. 
 It is created to construct promoter libraries, further exploiting biological capabilities of the microorganisms that allow for the fine-tuning of genetic circuits. A neural network has been trained on hundreds of thousands of sequences that have been randomized in the **17nt spacer sequence**. Therefore, generated promoters, ranging from no expression (strengh: `0`) to high expression (strength: `10`) all feature the same UP-region, binding boxes (-35, -10) and untranslated region (UTR).
