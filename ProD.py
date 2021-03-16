@@ -5,7 +5,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from scipy.stats import logistic
 import argparse
-from pdb import set_trace
 
 DEF_ARGS = argparse.Namespace(data_path='ex_seqs.fa', output_path='ex_seqs_out', cuda=False)
 
@@ -28,7 +27,7 @@ class Log():
     def add(self, input):
         print(input)
         self.logs.append(input)
-        
+
 class ORNet(nn.Module):
     def __init__(self, in_features, nclass, device):
         super(ORNet, self).__init__()
@@ -42,7 +41,7 @@ class ORNet(nn.Module):
         self.or_bias = torch.nn.Parameter(biasm.sort(descending=True)[0])
         self.fc1_bias = nn.Linear(self.in_features, 1, bias=False)
         self.logit = False
-        
+
     def forward(self, x):
         # calculate t(W_or,i)*Phi(x)
         x = self.fc1_bias(x)
@@ -62,7 +61,7 @@ class ORNet(nn.Module):
                        torch.zeros((y.shape[0],1)).to(self.device)), dim=1)
         x = x[:,:-1] - x[:,1:]
         x = torch.log(torch.div(x,(1-x)))
-        
+
         if self.logit:
             #y = torch.log(torch.div(y,(1-y)))
             return y
@@ -83,11 +82,11 @@ class PromNeural(nn.Module):
         self.or_type = 3
         self.layers = 2
         self.do = nn.Dropout(0.3)
-        self.nclass = nclass # number of classes   
-        
+        self.nclass = nclass # number of classes
+
         self.conv_kernels = 16
         self.conv_kernels_2 = 32
-        
+
         self.conv_ch_1 = nn.Conv2d(4, 4, (1, 1))
         self.conv1 = nn.Conv2d(4, self.conv_kernels, (4, 1), stride=(1,1))
         self.conv2 = nn.Conv2d(self.conv_kernels, self.conv_kernels_2,
@@ -103,9 +102,9 @@ class PromNeural(nn.Module):
         x = x.view(-1, 13*self.conv_kernels_2)
         x = F.relu(self.fc1(self.do(x)))
         x = F.relu(self.fc2(x))
-        
+
         x = self.ornet(x)
-        
+
         return x
 
 def calc_gen_seq(out):
@@ -132,7 +131,7 @@ def calc_gen_seq(out):
     degen_dict = {m[0]: np.unique(m[1]) for m in matrix.iteritems()}
     seq = seq.append(pd.Series({k: get_degen_key(v) for k, v in degen_dict.items()}))
     seq = seq.sort_index().values.astype('|S1').tostring().decode('utf-8')
-    
+
     return seq
 
 def create_output(pred_te_prob, pred_te_disc, seq_ids, seqs):
@@ -143,13 +142,13 @@ def create_output(pred_te_prob, pred_te_disc, seq_ids, seqs):
         ids = np.arange(len(seqs))
 
     output = pd.DataFrame({'ID': ids, 'spacer':seqs, 'strength': pred_te_disc})
-    
+
     output['promoter'] = ' GGTCTATGAGTGGTTGCTGGATAAC TTTACG ' + output.spacer + \
     ' TATAAT ATATTC AGGGAGAGCACAACGGTTTCCCTCTACAAATAATTTTGTTTAACTTT'
 
     for key, series in probs_dict.items():
         output[key] = series
-    
+
     return output
 
 def get_degen_key(array):
@@ -165,7 +164,7 @@ def img_to_string(seqs_img):
         for idx, nt_img in enumerate(seq_img.transpose(1,0,2)):
             seq[idx] = IMG_DICT[nt_img.argmax()]
         seqs.append(seq.tostring().decode('utf-8'))
-    
+
     return seqs
 
 def initialize_model(cuda=False):
@@ -176,7 +175,7 @@ def initialize_model(cuda=False):
     model.load_state_dict(torch.load('models/model_RPOD.pt', map_location=device))
     model.to(device)
     model.eval()
-    
+
     return model
 
 def parse_lines(lines):
@@ -192,10 +191,10 @@ def parse_lines(lines):
             seqs.append(seq)
         else:
             excl_seqs.append(seq)
-        
+
     if len(excl_seqs) > 0:
         print(f'{excl_seqs}: invalid spacer sequences excluded from data.')
-    
+
     return seq_ids, seqs
 
 def read_data(input_data):
@@ -209,7 +208,7 @@ def read_data(input_data):
                 seq_ids, seqs = parse_lines(f)
 
     assert len(seqs)>0, "No valid sequences"
-    
+
     return seq_ids, seqs
 
 def string_to_img(seqs, random=True):
@@ -230,7 +229,7 @@ def string_to_img(seqs, random=True):
                 seqs_img[idx1, np.random.choice(SEQ_DICT[nt]), idx2, 0] = 1
             else:
                 seqs_img[idx1, nt, idx2, 0] = 1
-            
+
     return seqs_img
 
 def string_to_string(seqs, random=True):
@@ -247,7 +246,7 @@ def string_to_string(seqs, random=True):
         else:
             seq = string.astype('|S1')
         seqs_new.append(seq.tostring().decode('utf-8'))
-                
+
     return seqs_new
 
 def forward_pass(model, seq_img, cuda=False):
@@ -255,7 +254,7 @@ def forward_pass(model, seq_img, cuda=False):
     pred_te = model(torch.Tensor(seq_img).to(device))
     pred_te_prob = logistic.cdf(pred_te.cpu().data.numpy())
     pred_te_disc = np.argmax(pred_te_prob, axis=1).astype(np.int)
-    
+
     return pred_te_prob, pred_te_disc
 
 def forward(input_data, lib=True, lib_size=5, classes=np.arange(11),
@@ -273,13 +272,13 @@ def forward(input_data, lib=True, lib_size=5, classes=np.arange(11),
         log.add(f'Input blueprint: {seqs[0]}')
         seqs = seqs[0:1]
         total = 1
-        
+
         for idx in np.arange(len(seqs[0])):
-            total *= len(SEQ_DICT[seqs[0][idx]])  
+            total *= len(SEQ_DICT[seqs[0][idx]])
         # GENERATE DATA
         if total < sample_size*5:
             random = False
-            log.add(f'Evaluating {total} possible sequences...')   
+            log.add(f'Evaluating {total} possible sequences...')
         else:
             log.add(f"WARNING: Library blueprint is not generated"
                     "(possible sequences: {total} < {5*sample_size}")
@@ -296,14 +295,14 @@ def forward(input_data, lib=True, lib_size=5, classes=np.arange(11),
         pred_prob, pred_disc = forward_pass(model, seqs_img[idx*1000:(idx+1)*1000], cuda)
         # CREATE OUTPUT
         outputs.append(create_output(pred_prob, pred_disc,
-                               seq_ids[idx*1000:(idx+1)*1000], 
+                               seq_ids[idx*1000:(idx+1)*1000],
                                seqs[idx*1000:(idx+1)*1000]))
         idx += 1
         if lib:
             out_temp = pd.DataFrame().append(outputs, ignore_index=True)
             counts = out_temp.strength.value_counts()
             cond_1 = np.array([cl in counts.index.values for cl in classes])
-            
+
             if random and cond_1.all() and (counts[classes] > lib_size).all():
                 break
             elif idx*1000 >= len(seqs) and not cond_1.all():
@@ -311,7 +310,7 @@ def forward(input_data, lib=True, lib_size=5, classes=np.arange(11),
                 if total>=sample_size*5:
                     log.add(f'Sampled {sample_size} out of {total} possible sequences.\n\
                     Rerun the tool to evaluate more samples')
-    
+
     match_all = pd.DataFrame().append(outputs, ignore_index=True)
     if lib:
         match_list = [match_all.loc[match_all.strength == i][:lib_size] for i in classes]
@@ -331,7 +330,7 @@ def forward(input_data, lib=True, lib_size=5, classes=np.arange(11),
                 string = string + '{}: {:.3f}\t'.format(idx,value)
             log.add(string)
         match_short = pd.DataFrame().append(match_list, ignore_index=True)
-        
+
         return match_short, log
     else:
         return match_all, log
@@ -349,7 +348,7 @@ def run_tool(input_data, output_path='my_predictions', lib=True, lib_size=5,
         return False
     else:
         return output.iloc[:,:4]
-    
+
 if __name__=="__main__":
     parser = argparse.ArgumentParser(description='Promoter Designer (ProD) tool')
     parser.add_argument('input_data', nargs="*", type=str, help="location of the text file"
@@ -379,4 +378,3 @@ if __name__=="__main__":
     output = run_tool(args.input_data, args.output_path, args.lib, args.lib_size,
                       args.strengths, args.cuda)
     print(output)
-    

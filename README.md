@@ -35,10 +35,19 @@ Binder offers the hosting of GitHub on their servers
 
 2. **Local installation**
 
-To run ProD on a local machine, simply clone the repository in your working directory and install the necessary python libraries:
+To run ProD on a local machine, simply clone the repository in your working directory and install the necessary python libraries. 
+
+For linux users:
 
 	git clone https://github.com/jdcla/FlowCyt.git
 	conda env create -f environment.yml
+
+For Mac and Windows users, the packages and their versions will have to be manually installed. These are listed in the `environment.yml` file. These include
+
+1. Pytorch (1.4.0)
+2. Numpy (1.19.1)
+3. Pandas (1.1.0)
+4. Scipy (1.5.2)
 
 No CUDA support is necessary (GPU accelarated processing), a PyTorch installation supporting CUDA is therefore not installed through `environment.yml`. See [www.pytorch.com](www.pytorch.com) for more information.
 
